@@ -20,11 +20,11 @@
 ```
 [JSON Files] → [EventService] → [event_store 테이블] (Write)
                      ↓
-              [TextBuilderService] → 자연어 텍스트 생성
+              [TextBuilderService] → 맥락(Context) + 센서 데이터 → 자연어 텍스트 생성
                      ↓
               [EmbeddingService] → Ollama bge-m3 → [embeddings 테이블]
                      ↓
-              [read_model 테이블] (플래트닝된 센서 데이터)
+              [read_model 테이블] (플래트닝된 센서 데이터 + 설치환경/위치)
 
 [사용자 질문] → [EmbeddingService] → 질문 임베딩
                      ↓
@@ -32,6 +32,8 @@
                      ↓
               [LlmService] → OpenAI (컨텍스트 + 질문) → 답변
 ```
+
+> **Contextual Retrieval 전략**: 센서 데이터를 임베딩할 때, 각 데이터 조각 앞에 "이 데이터는 어떤 장비의 어떤 환경에서 수집된 것인지" 맥락 설명을 붙여 저장한다. 단순 수치 나열 대비 의미 기반 검색 정확도가 크게 향상된다.
 
 ---
 
@@ -156,38 +158,40 @@ CREATE INDEX IF NOT EXISTS idx_event_store_device_type ON event_store(device_typ
 -- 센서 데이터를 플래트닝하여 조회 최적화
 -- =============================================
 CREATE TABLE IF NOT EXISTS read_model (
-    id                    BIGSERIAL PRIMARY KEY,
-    event_id              BIGINT NOT NULL REFERENCES event_store(id),
-    device_id             VARCHAR(50) NOT NULL,
-    device_type           VARCHAR(10) NOT NULL,
-    device_manufacturer   VARCHAR(50),
-    device_name           VARCHAR(50),
-    collected_at          TIMESTAMP NOT NULL,
+    id                        BIGSERIAL PRIMARY KEY,
+    event_id                  BIGINT NOT NULL REFERENCES event_store(id),
+    device_id                 VARCHAR(50) NOT NULL,
+    device_type               VARCHAR(10) NOT NULL,
+    device_manufacturer       VARCHAR(50),
+    device_name               VARCHAR(50),
+    installation_environment  VARCHAR(50),          -- 설치환경 ('테스트베드', '현장' 등)
+    location                  VARCHAR(100),         -- 물리적 위치 ('agv/01/agv01_0901_0812')
+    collected_at              TIMESTAMP NOT NULL,
     -- 먼지 센서
-    pm10                  REAL,
-    pm25                  REAL,
-    pm10_raw              REAL,               -- PM1.0
+    pm10                      REAL,
+    pm25                      REAL,
+    pm1_0                     REAL,                 -- PM1.0 (초미세먼지)
     -- 온도 센서
-    ntc_temp              REAL,
+    ntc_temp                  REAL,
     -- 전류 센서
-    ct1                   REAL,
-    ct2                   REAL,
-    ct3                   REAL,
-    ct4                   REAL,
+    ct1                       REAL,
+    ct2                       REAL,
+    ct3                       REAL,
+    ct4                       REAL,
     -- IR 열화상
-    ir_temp_max           REAL,
-    ir_temp_max_x         REAL,
-    ir_temp_max_y         REAL,
+    ir_temp_max               REAL,
+    ir_temp_max_x             REAL,
+    ir_temp_max_y             REAL,
     -- 어노테이션 (0=정상, 1=경고, 2=이상)
-    state                 SMALLINT NOT NULL DEFAULT 0,
+    state                     SMALLINT NOT NULL DEFAULT 0,
     -- 외부 환경
-    ext_temperature       REAL,
-    ext_humidity          REAL,
-    ext_illuminance       REAL,
+    ext_temperature           REAL,
+    ext_humidity              REAL,
+    ext_illuminance           REAL,
     -- 메타데이터
-    cumulative_op_days    INT,
-    equipment_history     INT,
-    created_at            TIMESTAMP NOT NULL DEFAULT NOW()
+    cumulative_op_days        INT,
+    equipment_history         INT,
+    created_at                TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_read_model_device_id ON read_model(device_id);
@@ -378,11 +382,13 @@ export const readModel = pgTable('read_model', {
   deviceType: varchar('device_type', { length: 10 }).notNull(),
   deviceManufacturer: varchar('device_manufacturer', { length: 50 }),
   deviceName: varchar('device_name', { length: 50 }),
+  installationEnvironment: varchar('installation_environment', { length: 50 }),
+  location: varchar('location', { length: 100 }),
   collectedAt: timestamp('collected_at').notNull(),
   // 먼지 센서
   pm10: real('pm10'),
   pm25: real('pm25'),
-  pm10Raw: real('pm10_raw'),
+  pm1_0: real('pm1_0'),
   // 온도 센서
   ntcTemp: real('ntc_temp'),
   // 전류 센서
@@ -643,9 +649,11 @@ export class EmbeddingService {
 }
 ```
 
-**`src/embedding/text-builder.service.ts`** - JSON을 자연어 텍스트로 변환
+**`src/embedding/text-builder.service.ts`** - JSON을 **맥락 포함 자연어 텍스트**로 변환
 
-이 서비스가 RAG 품질을 결정하는 핵심. 센서 데이터를 사람이 읽을 수 있는 문장으로 변환해야 한다.
+이 서비스가 RAG 품질을 결정하는 핵심. **Contextual Retrieval** 기법을 적용하여, 센서 데이터를 단순 나열하는 것이 아니라 "이 데이터가 전체 데이터셋에서 어떤 위치에 있는지" 맥락 설명을 앞에 붙인다.
+
+> **RAG 저장 전략**: 문서(센서 데이터)를 저장할 때, 각 조각이 전체 데이터셋에서 어떤 맥락인지 설명을 함께 저장한다. 이를 통해 벡터 검색 시 단순 수치 매칭이 아닌, 의미 기반 검색 정확도를 높인다.
 
 ```typescript
 import { Injectable } from '@nestjs/common';
@@ -664,23 +672,37 @@ export class TextBuilderService {
     const stateLabel = state === '0' ? '정상' : state === '1' ? '경고' : '이상';
     const deviceType = meta.device_id.replace(/\d+/g, '').toUpperCase();
 
-    return [
-      `장비 ${meta.device_id} (${meta.device_manufacturer} ${meta.device_name}, 유형: ${deviceType})`,
-      `수집시각: ${meta.collection_date} ${meta.collection_time}.`,
-      `미세먼지: PM10=${sensors.PM10[0].value}µg/m3, PM2.5=${sensors['PM2.5'][0].value}µg/m3, PM1.0=${sensors['PM1.0'][0].value}µg/m3.`,
-      `온도: NTC=${sensors.NTC[0].value}℃.`,
+    // --- 맥락 설명 (Contextual Prefix) ---
+    // 이 조각이 전체 데이터셋에서 어떤 위치에 있는지 설명
+    const contextPrefix = [
+      `[맥락] 이 데이터는 ${meta.installation_environment} 환경에 설치된`,
+      `${deviceType} 유형 산업용 장비 ${meta.device_id}(제조사: ${meta.device_manufacturer}, 모델: ${meta.device_name})의`,
+      `${meta.collection_date} ${meta.collection_time} 시점 센서 텔레메트리 기록이다.`,
+      `장비 위치는 ${meta.location}이며, 누적 가동 ${meta.cumulative_operating_day}일차,`,
+      `정비 ${meta.equipment_history}회 이력이 있는 장비의 상태는 "${stateLabel}"으로 판정되었다.`,
+    ].join(' ');
+
+    // --- 센서 데이터 본문 ---
+    const sensorBody = [
+      `미세먼지: PM10=${sensors.PM10[0].value}µg/m³, PM2.5=${sensors['PM2.5'][0].value}µg/m³, PM1.0=${sensors['PM1.0'][0].value}µg/m³.`,
+      `내부온도: NTC=${sensors.NTC[0].value}℃.`,
       `전류: CT1=${sensors.CT1[0].value}A, CT2=${sensors.CT2[0].value}A, CT3=${sensors.CT3[0].value}A, CT4=${sensors.CT4[0].value}A.`,
       `IR 열화상 최대온도: ${ir.temp_max[0].value_TGmx}℃ (좌표: ${ir.temp_max[0].X_Tmax}, ${ir.temp_max[0].Y_Tmax}).`,
       `외부환경: 온도=${external.ex_temperature[0].value}℃, 습도=${external.ex_humidity[0].value}%, 조도=${external.ex_illuminance[0].value}lux.`,
-      `누적가동일: ${meta.cumulative_operating_day}일, 정비이력: ${meta.equipment_history}회.`,
-      `상태: ${stateLabel}.`,
     ].join(' ');
+
+    return `${contextPrefix}\n${sensorBody}`;
   }
 }
 ```
 
 생성되는 텍스트 예시:
-> "장비 oht09 (A A1, 유형: OHT) 수집시각: 08-27 00:05:57. 미세먼지: PM10=20µg/m3, PM2.5=12µg/m3, PM1.0=8µg/m3. 온도: NTC=28.41℃. 전류: CT1=66.31A, CT2=1.56A, CT3=0.87A, CT4=0.72A. IR 열화상 최대온도: 71.77℃ (좌표: 12, 85). 외부환경: 온도=22℃, 습도=35%, 조도=528lux. 누적가동일: 18일, 정비이력: 13회. 상태: 이상."
+> **[맥락 + 센서 데이터가 결합된 형태]**
+>
+> "[맥락] 이 데이터는 테스트베드 환경에 설치된 OHT 유형 산업용 장비 oht09(제조사: A, 모델: A1)의 08-27 00:05:57 시점 센서 텔레메트리 기록이다. 장비 위치는 oht/09/oht09_0827_0005이며, 누적 가동 18일차, 정비 13회 이력이 있는 장비의 상태는 "이상"으로 판정되었다.
+> 미세먼지: PM10=20µg/m³, PM2.5=12µg/m³, PM1.0=8µg/m³. 내부온도: NTC=28.41℃. 전류: CT1=66.31A, CT2=1.56A, CT3=0.87A, CT4=0.72A. IR 열화상 최대온도: 71.77℃ (좌표: 12, 85). 외부환경: 온도=22℃, 습도=35%, 조도=528lux."
+>
+> 맥락 설명이 앞에 붙어 있어, 벡터 검색 시 "테스트베드에서 이상 상태인 OHT 장비" 같은 질문에도 높은 유사도를 얻을 수 있다.
 
 **`src/embedding/embedding.module.ts`**
 
@@ -719,7 +741,7 @@ export class EventService {
     private readonly textBuilder: TextBuilderService,
   ) {}
 
-  async ingestFile(filePath: string): Promise<void> {
+  async ingestFile(filePath: string, year = 2024): Promise<void> {
     const file = Bun.file(filePath);
     const json: SensorEventJson = await file.json();
     const meta = json.meta_info[0];
@@ -734,7 +756,7 @@ export class EventService {
 
     if (existing.length > 0) return;
 
-    const collectedAt = this.parseDate(meta.collection_date, meta.collection_time);
+    const collectedAt = this.parseDate(meta.collection_date, meta.collection_time, year);
     const deviceType = meta.device_id.replace(/\d+/g, '');
 
     // 2. event_store에 저장
@@ -762,10 +784,12 @@ export class EventService {
       deviceType,
       deviceManufacturer: meta.device_manufacturer,
       deviceName: meta.device_name,
+      installationEnvironment: meta.installation_environment,
+      location: meta.location,
       collectedAt,
       pm10: sensors.PM10[0].value,
       pm25: sensors['PM2.5'][0].value,
-      pm10Raw: sensors['PM1.0'][0].value,
+      pm1_0: sensors['PM1.0'][0].value,
       ntcTemp: sensors.NTC[0].value,
       ct1: sensors.CT1[0].value,
       ct2: sensors.CT2[0].value,
@@ -782,7 +806,7 @@ export class EventService {
       equipmentHistory: parseInt(meta.equipment_history, 10),
     });
 
-    // 4. 텍스트 생성 → 임베딩 → embeddings 테이블 저장
+    // 4. 맥락 포함 텍스트 생성 → 임베딩 → embeddings 테이블 저장
     const text = this.textBuilder.build(meta, sensors, ir, annotation, ext);
     const vector = await this.embeddingService.embed(text);
 
@@ -795,15 +819,16 @@ export class EventService {
         device_type: deviceType,
         state: annotation.tagging[0].state,
         collected_at: collectedAt.toISOString(),
+        installation_environment: meta.installation_environment,
+        location: meta.location,
       },
     });
   }
 
-  private parseDate(dateStr: string, timeStr: string): Date {
+  private parseDate(dateStr: string, timeStr: string, year: number): Date {
     // dateStr = "08-27", timeStr = "00:05:57"
-    // TODO: 데이터에 연도 정보 없음. 필요시 수정
     const [month, day] = dateStr.split('-');
-    return new Date(`2024-${month}-${day}T${timeStr}`);
+    return new Date(`${year}-${month}-${day}T${timeStr}`);
   }
 }
 ```
@@ -839,6 +864,9 @@ async function main() {
   const app = await NestFactory.createApplicationContext(AppModule);
   const eventService = app.get(EventService);
 
+  // 연도 파라미터: CLI 인자로 전달 가능 (기본값 2024)
+  const year = parseInt(process.argv[2] ?? '2024', 10);
+
   const glob = new Glob('**/*.json');
   const dataDir = './data';
   const files: string[] = [];
@@ -847,7 +875,7 @@ async function main() {
     files.push(path);
   }
 
-  console.log(`Found ${files.length} JSON files`);
+  console.log(`Found ${files.length} JSON files (year: ${year})`);
 
   const BATCH_SIZE = 50;
   let success = 0;
@@ -856,7 +884,7 @@ async function main() {
   for (let i = 0; i < files.length; i += BATCH_SIZE) {
     const batch = files.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
-      batch.map((f) => eventService.ingestFile(f)),
+      batch.map((f) => eventService.ingestFile(f, year)),
     );
 
     for (const result of results) {
@@ -882,7 +910,11 @@ main();
 실행:
 
 ```bash
+# 기본 (2024년)
 bun run src/cli/ingest.ts
+
+# 연도 지정
+bun run src/cli/ingest.ts 2025
 ```
 
 ### 5-9. LLM 모듈
@@ -1167,8 +1199,10 @@ curl -X POST http://localhost:3000/query \
 ## 주의사항
 
 1. **Drizzle + pgvector HNSW 인덱스**: Drizzle Kit은 HNSW 인덱스 구문을 생성하지 못한다. 반드시 `init.sql`에서 수동으로 생성해야 한다.
-2. **날짜 파싱**: JSON의 `collection_date`에 연도 없음 → 현재 `2024`로 하드코딩. 실제 데이터에 맞게 수정 필요.
+2. **날짜 파싱**: JSON의 `collection_date`에 연도 없음. `ingestFile(filePath, year)` 및 CLI 인자(`bun run src/cli/ingest.ts 2024`)로 연도를 지정한다.
 3. **macOS Ollama**: Docker에서 GPU 사용 불가. 개발 시 네이티브 Ollama가 Metal 가속으로 훨씬 빠름.
-4. **적재 시간**: ~109,000 파일, 배치 50개 기준 약 10~30분 예상 (Ollama 성능에 따라 상이).
+4. **적재 시간**: ~99,500 파일, 배치 50개 기준 약 10~30분 예상 (Ollama 성능에 따라 상이).
 5. **멱등성**: `source_file` UNIQUE 제약으로 동일 파일 중복 적재 방지. 스크립트 재실행 안전.
 6. **pg 패키지**: Drizzle에서 `node-postgres` (pg) 사용 시 `bun add pg @types/pg` 필요. 또는 `postgres` (postgres.js)로 대체 가능.
+7. **Contextual RAG**: `TextBuilderService`에서 맥락 설명(장비 유형, 설치환경, 위치, 가동일수, 상태)을 데이터 앞에 붙여 저장한다. 이를 통해 "테스트베드의 이상 상태 OHT 장비" 같은 고수준 질의에도 높은 검색 정확도를 얻는다.
+8. **컬럼명 `pm1_0`**: JSON의 `PM1.0`(초미세먼지 1.0µm)에 대응한다. 이전 `pm10_raw`에서 혼동을 방지하기 위해 변경됨.

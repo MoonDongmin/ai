@@ -1,0 +1,367 @@
+{
+  "id": "6d81b5b0-52de-4420-b998-f4d6cde1a3ea",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.embeddings": {
+      "name": "embeddings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1024)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_embeddings_device_id": {
+          "name": "idx_embeddings_device_id",
+          "columns": [
+            {
+              "expression": "device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "embeddings_event_id_event_store_id_fk": {
+          "name": "embeddings_event_id_event_store_id_fk",
+          "tableFrom": "embeddings",
+          "tableTo": "event_store",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.event_store": {
+      "name": "event_store",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'sensor_reading'"
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_type": {
+          "name": "device_type",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collected_at": {
+          "name": "collected_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_file": {
+          "name": "source_file",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "event_store_source_file_unique": {
+          "name": "event_store_source_file_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "source_file"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.read_model": {
+      "name": "read_model",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_id": {
+          "name": "device_id",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_type": {
+          "name": "device_type",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "device_manufacturer": {
+          "name": "device_manufacturer",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_name": {
+          "name": "device_name",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "installation_environment": {
+          "name": "installation_environment",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "location": {
+          "name": "location",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "collected_at": {
+          "name": "collected_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pm10": {
+          "name": "pm10",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pm25": {
+          "name": "pm25",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pm1_0": {
+          "name": "pm1_0",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ntc_temp": {
+          "name": "ntc_temp",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ct1": {
+          "name": "ct1",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ct2": {
+          "name": "ct2",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ct3": {
+          "name": "ct3",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ct4": {
+          "name": "ct4",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ir_temp_max": {
+          "name": "ir_temp_max",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ir_temp_max_x": {
+          "name": "ir_temp_max_x",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ir_temp_max_y": {
+          "name": "ir_temp_max_y",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ext_temperature": {
+          "name": "ext_temperature",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ext_humidity": {
+          "name": "ext_humidity",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ext_illuminance": {
+          "name": "ext_illuminance",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cumulative_op_days": {
+          "name": "cumulative_op_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "equipment_history": {
+          "name": "equipment_history",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "read_model_event_id_event_store_id_fk": {
+          "name": "read_model_event_id_event_store_id_fk",
+          "tableFrom": "read_model",
+          "tableTo": "event_store",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
