@@ -1,0 +1,29 @@
+name: simple-rag
+
+services:
+  pg-vector:
+    image: pgvector/pgvector:0.8.2-pg18-trixie
+    container_name: vectordb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - "1234:5432"
+    volumes:
+      - ./pg-data:/var/lib/postgresql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+
+#volumes:
+#  pg-data:
+#    driver: local
+#    driver_opts:
+#      type: none
+#      o: bind
+#      device: ${PWD}/pg-data
