@@ -1,9 +1,9 @@
 import {
   drizzle,
   type NodePgDatabase,
-} from "drizzle-orm/node-postgres";
+}                  from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
-import {Pool} from "pg";
+import {Pool}      from "pg";
 
 export const DRIZZLE: symbol = Symbol("DRIZZLE");
 

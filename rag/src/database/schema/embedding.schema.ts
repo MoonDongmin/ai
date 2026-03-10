@@ -1,14 +1,14 @@
 import {
-  pgTable,
-  bigserial,
   bigint,
-  varchar,
-  text,
-  jsonb,
-  timestamp,
-  index,
+  bigserial,
   customType,
+  index,
+  jsonb,
+  pgTable,
   PgTableWithColumns,
+  text,
+  timestamp,
+  varchar,
 }                   from "drizzle-orm/pg-core";
 import {eventStore} from "./event-store.schema";
 

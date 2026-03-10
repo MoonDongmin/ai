@@ -34,7 +34,7 @@ export class SqlValidatorService {
     }
 
     // 2. 위험한 키워드 차단
-    const forbidden = ["insert", "update", "delete", "drop", "alter", "create", "truncate", "grant", "revoke"];
+    const forbidden: string[] = ["insert", "update", "delete", "drop", "alter", "create", "truncate", "grant", "revoke"];
     for (const keyword of forbidden) {
       // 단어 경계로 체크 (컬럼명에 포함된 경우 오탐 방지)
       const regex = new RegExp(`\\b${keyword}\\b`, "i");

@@ -14,7 +14,7 @@ export class EmbeddingService {
   }
 
   async embed(text: string) {
-    const response = await fetch(`${this.baseUrl}/api/embed`, {
+    const response: Response = await fetch(`${this.baseUrl}/api/embed`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

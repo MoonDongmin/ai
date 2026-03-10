@@ -1,9 +1,6 @@
 import {Module}          from "@nestjs/common";
 import {EventModule}     from "@/event/event.module";
-import {
-  ConfigModule,
-  ConfigService,
-}                        from "@nestjs/config";
+import {ConfigModule}   from "@nestjs/config";
 import configuration     from "@/config/configuration";
 import {DatabaseModule}  from "@/database/database.module";
 import {EmbeddingModule} from "@/embedding/embedding.module";
